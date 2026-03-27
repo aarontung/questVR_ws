@@ -35,6 +35,22 @@ TELEOP_GRIPPER_DEADBAND = 0.001
 TELEOP_GRIPPER_RATE = 0.03
 TELEOP_GRIPPER_MAX_M = 0.04
 TELEOP_CONTROL_HZ = 90.0
+TELEOP_XYZ_ABSOLUTE = True
+TELEOP_ABS_XYZ_SCALE = 1.0
+TELEOP_LOCK_RPY = False
+TELEOP_LOCK_ROLL = 0.0
+TELEOP_LOCK_PITCH = 0.0
+TELEOP_LOCK_YAW = 0.0
+TELEOP_ROLL_MIN_RAD = -0.6
+TELEOP_ROLL_MAX_RAD = 0.6
+TELEOP_PITCH_MIN_RAD = -0.6
+TELEOP_PITCH_MAX_RAD = 0.6
+TELEOP_YAW_MIN_RAD = -0.2
+TELEOP_YAW_MAX_RAD = 0.2
+TELEOP_IK_SPEED = 8.0
+TELEOP_DISABLE_IK = False
+TELEOP_STOP_IK_WHEN_A = False
+TELEOP_RX_PRINT_HZ = 0.0
 
 def matrix_to_xyzrpy(matrix):
     x = matrix[0, 3]
@@ -344,14 +360,20 @@ class VR:
         self.last_sent_gripper = None
         self.gripper_max = float(TELEOP_GRIPPER_MAX_M or 0.03)
         self.gripper_cmd = 0.0
+        self.rx_print_hz = float(TELEOP_RX_PRINT_HZ or 0.0)
+        self.rx_print_period = (1.0 / self.rx_print_hz) if self.rx_print_hz > 0.0 else 0.0
+        self.last_rx_print_time = rospy.Time(0)
         
         # 延时0.5秒，确保 OculusReader 初始化完成   
         import time
         time.sleep(0.5)
 
         self.target_pose = [0.19, 0.0, 0.2, 0, 0, 0]
+        self.ik_cmd_pose = list(self.target_pose)
         self.last_vr_pose = None
         self.latest_vr_pose = None
+        self.abs_ref_vr_pos = None
+        self.abs_base_target_pos = None
         self.prev_b_pressed = False
         self.orient_ref_vr_q = None
         self.orient_base_target_q = None
@@ -415,6 +437,15 @@ class VR:
             w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
         ]
 
+    @staticmethod
+    def _wrap_to_pi(x):
+        return math.atan2(math.sin(x), math.cos(x))
+
+    @staticmethod
+    def _approach_angle(curr, target, alpha):
+        d = VR._wrap_to_pi(target - curr)
+        return VR._wrap_to_pi(curr + alpha * d)
+
     def _integrate_relative_pose(self, prev_vr_pose, curr_vr_pose):
         dpos = math.sqrt(
             (curr_vr_pose[0] - prev_vr_pose[0]) ** 2 +
@@ -437,7 +468,26 @@ class VR:
         self.target_pose[1] += dy
         self.target_pose[2] += dz
 
+    def _update_absolute_translation(self, curr_vr_pose):
+        if self.abs_ref_vr_pos is None or self.abs_base_target_pos is None:
+            self.abs_ref_vr_pos = [curr_vr_pose[0], curr_vr_pose[1], curr_vr_pose[2]]
+            self.abs_base_target_pos = [self.target_pose[0], self.target_pose[1], self.target_pose[2]]
+        dx = (curr_vr_pose[0] - self.abs_ref_vr_pos[0]) * TELEOP_ABS_XYZ_SCALE
+        dy = (curr_vr_pose[1] - self.abs_ref_vr_pos[1]) * TELEOP_ABS_XYZ_SCALE
+        dz = (curr_vr_pose[2] - self.abs_ref_vr_pos[2]) * TELEOP_ABS_XYZ_SCALE
+        dpos = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if dpos < self.deadband_pos_m:
+            return
+        self.target_pose[0] = self.abs_base_target_pos[0] + dx
+        self.target_pose[1] = self.abs_base_target_pos[1] + dy
+        self.target_pose[2] = self.abs_base_target_pos[2] + dz
+
     def _update_absolute_orientation(self, curr_vr_pose):
+        if TELEOP_LOCK_RPY:
+            self.target_pose[3] = TELEOP_LOCK_ROLL
+            self.target_pose[4] = TELEOP_LOCK_PITCH
+            self.target_pose[5] = TELEOP_LOCK_YAW
+            return
         q_curr = quaternion_from_euler(curr_vr_pose[3], curr_vr_pose[4], curr_vr_pose[5])
         if self.orient_ref_vr_q is None or self.orient_base_target_q is None:
             self.orient_ref_vr_q = list(q_curr)
@@ -461,7 +511,11 @@ class VR:
         norm = math.sqrt(sum(v * v for v in q_target))
         if norm > 1e-9:
             q_target = [v / norm for v in q_target]
-        self.target_pose[3], self.target_pose[4], self.target_pose[5] = euler_from_quaternion(q_target)
+        roll, pitch, yaw = euler_from_quaternion(q_target)
+        roll = float(np.clip(roll, TELEOP_ROLL_MIN_RAD, TELEOP_ROLL_MAX_RAD))
+        pitch = float(np.clip(pitch, TELEOP_PITCH_MIN_RAD, TELEOP_PITCH_MAX_RAD))
+        yaw = float(np.clip(yaw, TELEOP_YAW_MIN_RAD, TELEOP_YAW_MAX_RAD))
+        self.target_pose[3], self.target_pose[4], self.target_pose[5] = roll, pitch, yaw
 
     def handle_pose_callback(self, msg):
         self.latest_vr_pose = [
@@ -489,11 +543,27 @@ class VR:
         b_pressed = bool(buttons.get('B', False))
         right_trig = float(buttons.get('rightTrig', 0.0))
         right_grip = float(buttons.get('rightGrip', 0.0))
+
+        if TELEOP_DISABLE_IK:
+            if self.rx_print_period > 0.0:
+                now = rospy.Time.now()
+                if (now - self.last_rx_print_time).to_sec() >= self.rx_print_period:
+                    rospy.loginfo(
+                        '[teleop_single][rx_only] pose_xyz=(%.3f, %.3f, %.3f) pose_rpy=(%.3f, %.3f, %.3f) A=%s B=%s rt=%.3f rg=%.3f btn_age=%.3fs',
+                        RR[0], RR[1], RR[2], RR[3], RR[4], RR[5],
+                        a_pressed, b_pressed, right_trig, right_grip, buttons_age
+                    )
+                    self.last_rx_print_time = now
+            return
+
         if a_pressed:
             # 按下A键后，机械臂回到初始点位并且记录 右 坐标原点
             self.piper_control.init_pose()
             self.target_pose = [0.19, 0.0, 0.2, 0, 0, 0]
+            self.ik_cmd_pose = list(self.target_pose)
             self.last_vr_pose = RR
+            self.abs_ref_vr_pos = [RR[0], RR[1], RR[2]]
+            self.abs_base_target_pos = [self.target_pose[0], self.target_pose[1], self.target_pose[2]]
             self.orient_ref_vr_q = list(quaternion_from_euler(RR[3], RR[4], RR[5]))
             self.orient_base_target_q = list(quaternion_from_euler(
                 self.target_pose[3], self.target_pose[4], self.target_pose[5]
@@ -507,11 +577,16 @@ class VR:
                 self.last_vr_pose = RR
             else:
                 if not self.prev_b_pressed:
+                    self.abs_ref_vr_pos = [RR[0], RR[1], RR[2]]
+                    self.abs_base_target_pos = [self.target_pose[0], self.target_pose[1], self.target_pose[2]]
                     self.orient_ref_vr_q = list(quaternion_from_euler(RR[3], RR[4], RR[5]))
                     self.orient_base_target_q = list(quaternion_from_euler(
                         self.target_pose[3], self.target_pose[4], self.target_pose[5]
                     ))
-                self._integrate_relative_pose(self.last_vr_pose, RR)
+                if TELEOP_XYZ_ABSOLUTE:
+                    self._update_absolute_translation(RR)
+                else:
+                    self._integrate_relative_pose(self.last_vr_pose, RR)
                 self._update_absolute_orientation(RR)
                 self.last_vr_pose = RR
                 self.prev_b_pressed = True
@@ -541,9 +616,16 @@ class VR:
 
         # B: 控制末端位姿；trigger/grip: 夾爪可獨立控制（不需按B）
         if b_pressed or gripper_changed:
+            dt = (1.0 / self.control_rate_hz) if self.control_rate_hz > 0.0 else (1.0 / 60.0)
+            alpha = float(np.clip(TELEOP_IK_SPEED * dt, 0.0, 1.0))
+            for i in (0, 1, 2):
+                self.ik_cmd_pose[i] = self.ik_cmd_pose[i] + alpha * (self.target_pose[i] - self.ik_cmd_pose[i])
+            self.ik_cmd_pose[3] = self._approach_angle(self.ik_cmd_pose[3], self.target_pose[3], alpha)
+            self.ik_cmd_pose[4] = self._approach_angle(self.ik_cmd_pose[4], self.target_pose[4], alpha)
+            self.ik_cmd_pose[5] = self._approach_angle(self.ik_cmd_pose[5], self.target_pose[5], alpha)
             self.get_ik_solution(
-                self.target_pose[0], self.target_pose[1], self.target_pose[2],
-                self.target_pose[3], self.target_pose[4], self.target_pose[5],
+                self.ik_cmd_pose[0], self.ik_cmd_pose[1], self.ik_cmd_pose[2],
+                self.ik_cmd_pose[3], self.ik_cmd_pose[4], self.ik_cmd_pose[5],
                 r_gripper_value, (b_pressed or gripper_changed)
             )
             

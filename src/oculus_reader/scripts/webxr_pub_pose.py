@@ -34,11 +34,27 @@ WEBXR_SENDER_HTML = """<!doctype html>
     body { font-family: sans-serif; margin: 24px; line-height: 1.4; }
     button { font-size: 18px; padding: 10px 18px; }
     pre { background: #111; color: #eee; padding: 12px; border-radius: 8px; overflow:auto; }
+    #xrHud {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      z-index: 9999;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.55);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 700;
+      pointer-events: none;
+      display: none;
+    }
   </style>
 </head>
 <body>
+  <div id="xrHud">FPS -- | TX --</div>
   <h2>WebXR Pose Publisher</h2>
   <p id="status">status: idle</p>
+  <p id="fps">fps: 0.0 (tx: 0.0)</p>
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
     <button id="startAutoBtn">Enter XR (Auto)</button>
     <button id="startArBtn">Enter Passthrough</button>
@@ -47,6 +63,8 @@ WEBXR_SENDER_HTML = """<!doctype html>
   <pre id="log">waiting...</pre>
   <script>
     const statusEl = document.getElementById("status");
+    const fpsEl = document.getElementById("fps");
+    const xrHudEl = document.getElementById("xrHud");
     const logEl = document.getElementById("log");
     const startAutoBtn = document.getElementById("startAutoBtn");
     const startArBtn = document.getElementById("startArBtn");
@@ -57,6 +75,14 @@ WEBXR_SENDER_HTML = """<!doctype html>
     let sendCounter = 0;
     let logCounter = 0;
     let seq = 0;
+    let frameCounter = 0;
+    let lastFpsTsMs = Date.now();
+    let lastClientFps = 0.0;
+    let lastClientTx = 0.0;
+    const LOG_EVERY_N = 120;
+    const TX_MAX_HZ = 30;
+    const TX_MIN_INTERVAL_MS = 1000.0 / TX_MAX_HZ;
+    let lastTxMs = 0;
 
     function clamp(v) { return Math.max(0, Math.min(1, v || 0)); }
     function buttonPressed(gp, idx) { return !!(gp && gp.buttons && gp.buttons[idx] && gp.buttons[idx].pressed); }
@@ -107,6 +133,7 @@ WEBXR_SENDER_HTML = """<!doctype html>
 
     function onXRFrame(t, frame) {
       const session = frame.session;
+      frameCounter += 1;
       const payload = {};
       for (const input of session.inputSources) {
         const hand = input.handedness;
@@ -123,11 +150,32 @@ WEBXR_SENDER_HTML = """<!doctype html>
       payload._meta = {
         seq: seq++,
         clientTsMs: Date.now(),
+        clientFps: lastClientFps,
+        clientTx: lastClientTx,
       };
-      sendCounter += 1;
-      sendPayload(payload);
+      const nowMs = Date.now();
+      // If socket has buffered data, drop this frame to avoid stale backlog.
+      if (ws && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= 0) {
+        if ((nowMs - lastTxMs) >= TX_MIN_INTERVAL_MS) {
+          sendCounter += 1;
+          sendPayload(payload);
+          lastTxMs = nowMs;
+        }
+      }
+      const dtMs = nowMs - lastFpsTsMs;
+      if (dtMs >= 1000) {
+        const fps = (frameCounter * 1000.0) / dtMs;
+        const tx = (sendCounter * 1000.0) / dtMs;
+        lastClientFps = fps;
+        lastClientTx = tx;
+        fpsEl.textContent = "fps: " + fps.toFixed(1) + " (tx: " + tx.toFixed(1) + ")";
+        xrHudEl.textContent = "FPS " + fps.toFixed(1) + " | TX " + tx.toFixed(1);
+        frameCounter = 0;
+        sendCounter = 0;
+        lastFpsTsMs = nowMs;
+      }
       logCounter += 1;
-      if (logCounter % 10 === 0) {
+      if (LOG_EVERY_N > 0 && (logCounter % LOG_EVERY_N === 0)) {
         logEl.textContent = JSON.stringify(payload);
       }
       session.requestAnimationFrame(onXRFrame);
@@ -151,8 +199,11 @@ WEBXR_SENDER_HTML = """<!doctype html>
           } catch (_) {}
         }
         xrSession = await navigator.xr.requestSession(sessionMode, {
-          optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"]
+          optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking", "dom-overlay"],
+          domOverlay: { root: document.body }
         });
+        xrSession.addEventListener("end", () => { xrHudEl.style.display = "none"; });
+        xrHudEl.style.display = "block";
         const canvas = document.createElement("canvas");
         const gl = canvas.getContext("webgl", { xrCompatible: true });
         await gl.makeXRCompatible();
@@ -166,6 +217,7 @@ WEBXR_SENDER_HTML = """<!doctype html>
         xrSession.requestAnimationFrame(onXRFrame);
       } catch (e) {
         statusEl.textContent = "status: failed " + e;
+        xrHudEl.style.display = "none";
       }
     }
 
@@ -212,6 +264,8 @@ class WebXRDataSource:
         self.last_rx_wall = 0.0
         self.last_seq = -1
         self.last_client_ts_ms = 0.0
+        self.last_client_fps = 0.0
+        self.last_client_tx = 0.0
         self.init_error = None
 
     @staticmethod
@@ -268,6 +322,8 @@ class WebXRDataSource:
         buttons = self._parse_buttons(payload if isinstance(payload, dict) else {})
         seq = -1
         client_ts_ms = 0.0
+        client_fps = 0.0
+        client_tx = 0.0
         if isinstance(payload, dict):
             meta = payload.get('_meta')
             if isinstance(meta, dict):
@@ -279,6 +335,14 @@ class WebXRDataSource:
                     client_ts_ms = float(meta.get('clientTsMs', 0.0))
                 except Exception:
                     client_ts_ms = 0.0
+                try:
+                    client_fps = float(meta.get('clientFps', 0.0))
+                except Exception:
+                    client_fps = 0.0
+                try:
+                    client_tx = float(meta.get('clientTx', 0.0))
+                except Exception:
+                    client_tx = 0.0
         with self._lock:
             self.transforms = transforms
             self.buttons = buttons
@@ -286,6 +350,8 @@ class WebXRDataSource:
             self.last_rx_wall = now
             self.last_seq = seq
             self.last_client_ts_ms = client_ts_ms
+            self.last_client_fps = client_fps
+            self.last_client_tx = client_tx
 
     async def _process_http_request(self, path, request_headers):
         del request_headers
@@ -381,6 +447,8 @@ class WebXRDataSource:
                 'last_rx_wall': float(self.last_rx_wall),
                 'last_seq': int(self.last_seq),
                 'last_client_ts_ms': float(self.last_client_ts_ms),
+                'last_client_fps': float(self.last_client_fps),
+                'last_client_tx': float(self.last_client_tx),
             }
 
 
@@ -396,7 +464,6 @@ class WebXRPosePublisher:
         self.debug_period = (1.0 / self.debug_hz) if self.debug_hz > 0.0 else 0.0
         self._last_debug_time = 0.0
         self._prev_rx_count = 0
-        self._prev_rx_wall = 0.0
 
         host = str(WEBXR_HOST)
         port = int(WEBXR_PORT)
@@ -498,18 +565,18 @@ class WebXRPosePublisher:
                     if now - self._last_debug_time >= self.debug_period:
                         dbg = self.source.get_debug()
                         age = (now - dbg['last_rx_wall']) if dbg['last_rx_wall'] > 0.0 else 1e9
-                        if self._prev_rx_wall > 0.0 and dbg['last_rx_wall'] > self._prev_rx_wall:
-                            dt = dbg['last_rx_wall'] - self._prev_rx_wall
-                            dcount = max(0, dbg['rx_count'] - self._prev_rx_count)
-                            rx_hz = (float(dcount) / dt) if dt > 1e-6 else 0.0
-                        else:
-                            rx_hz = 0.0
+                        # Use debug interval for rate estimation; more stable than "last packet timestamp" deltas.
+                        dt = now - self._last_debug_time if self._last_debug_time > 0.0 else self.debug_period
+                        dcount = max(0, dbg['rx_count'] - self._prev_rx_count)
+                        rx_hz = (float(dcount) / dt) if dt > 1e-6 else 0.0
                         client_age_ms = (now * 1000.0 - dbg['last_client_ts_ms']) if dbg['last_client_ts_ms'] > 0.0 else -1.0
                         rospy.loginfo(
-                            '[webxr_debug] rx_hz=%.1f age=%.3fs client_age=%.1fms seq=%d A=%s B=%s rt=%.3f rg=%.3f hasR=%s hasL=%s',
+                            '[webxr_debug] rx_hz=%.1f age=%.3fs client_age=%.1fms cfps=%.1f ctx=%.1f seq=%d A=%s B=%s rt=%.3f rg=%.3f hasR=%s hasL=%s',
                             rx_hz,
                             age,
                             client_age_ms,
+                            dbg.get('last_client_fps', 0.0),
+                            dbg.get('last_client_tx', 0.0),
                             dbg['last_seq'],
                             bool(buttons.get('A', False)),
                             bool(buttons.get('B', False)),
@@ -519,7 +586,6 @@ class WebXRPosePublisher:
                             ('l' in transforms),
                         )
                         self._prev_rx_count = dbg['rx_count']
-                        self._prev_rx_wall = dbg['last_rx_wall']
                         self._last_debug_time = now
                 self.rate.sleep()
         finally:

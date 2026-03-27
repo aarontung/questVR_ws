@@ -132,7 +132,6 @@ class PIPER:
         joint_states_msgs.position = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         self.left_pub_joint.publish(joint_states_msgs)
         # self.rate.sleep()
-        print("send joint control piper command")
         
     def right_init_pose(self):
         joint_states_msgs = JointState()
@@ -142,7 +141,6 @@ class PIPER:
         joint_states_msgs.position = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         self.right_pub_joint.publish(joint_states_msgs)
         # self.rate.sleep()
-        print("send joint control piper command")
         
     def descartes_control_piper(self,x,y,z,roll,pitch,yaw,gripper):
         self.descartes_msgs.x = x
@@ -169,7 +167,6 @@ class PIPER:
         joint_states_msgs.position.append(gripper)
         self.pub_joint.publish(joint_states_msgs)
         # self.rate.sleep()
-        print("send joint control piper command")
     
     def left_joint_control_piper(self,j1,j2,j3,j4,j5,j6,gripper):
         joint_states_msgs = JointState()
@@ -185,7 +182,6 @@ class PIPER:
         joint_states_msgs.position.append(gripper)
         self.left_pub_joint.publish(joint_states_msgs)
         # self.rate.sleep()
-        print("send joint control piper command")
         
     
     def right_joint_control_piper(self,j1,j2,j3,j4,j5,j6,gripper):
@@ -202,7 +198,6 @@ class PIPER:
         joint_states_msgs.position.append(gripper)
         self.right_pub_joint.publish(joint_states_msgs)
         # self.rate.sleep()
-        print("send joint control piper command")
     
     
      
