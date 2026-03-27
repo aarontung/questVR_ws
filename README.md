@@ -396,13 +396,10 @@ self.oculus_reader = OculusReader(ip_address='192.168.1.101')
 
 ### 启动方式
 
+推荐直接使用脚本（已内置 WebXR 与 HTTPS 参数）：
+
 ```bash
-export OCULUS_READER_BACKEND=webxr
-export WEBXR_HOST=0.0.0.0
-export WEBXR_PORT=8012
-export WEBXR_CERT=/path/to/fullchain.pem
-export WEBXR_KEY=/path/to/privkey.pem
-roslaunch oculus_reader teleop_single_piper.launch
+./run_signle_teleop_xr.sh
 ```
 
 然后在 PICO 打开：
@@ -412,30 +409,6 @@ https://<你的电脑IP>:8012
 ```
 
 进入页面后点击 `Enter VR`，动手柄后终端会开始发布 `/right_handle_pose`。
-
-### WebXR 的 SSL（HTTPS）配置
-
-WebXR 需要安全上下文，建议直接配置 TLS：
-
-```bash
-export OCULUS_READER_BACKEND=webxr
-export WEBXR_CERT=/path/to/fullchain.pem
-export WEBXR_KEY=/path/to/privkey.pem
-```
-
-然后正常启动：
-
-```bash
-roslaunch oculus_reader teleop_single_piper.launch
-```
-
-若你仅用于内网测试，可先生成自签证书（注意：PICO/浏览器必须信任该证书链）：
-
-```bash
-openssl req -x509 -newkey rsa:2048 -nodes \
-  -keyout server.key -out server.crt -days 365 \
-  -subj "/CN=<你的IP或域名>"
-```
 
 ### Docker 运行（WebXR）
 
