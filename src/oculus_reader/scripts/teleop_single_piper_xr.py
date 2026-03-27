@@ -35,8 +35,21 @@ TELEOP_GRIPPER_DEADBAND = 0.001
 TELEOP_GRIPPER_RATE = 0.03
 TELEOP_GRIPPER_MAX_M = 0.04
 TELEOP_CONTROL_HZ = 90.0
-TELEOP_XYZ_ABSOLUTE = True
+TELEOP_XYZ_ABSOLUTE = False
 TELEOP_ABS_XYZ_SCALE = 1.0
+TELEOP_ABS_X_SCALE = 1.0
+TELEOP_ABS_Y_SCALE = 1.0
+TELEOP_ABS_Z_SCALE = 1.0
+TELEOP_ABS_X_OFFSET = 0.0
+TELEOP_ABS_Y_OFFSET = 0.0
+TELEOP_ABS_Z_OFFSET = 0.0
+TELEOP_RPY_ABSOLUTE = True
+TELEOP_ABS_ROLL_SCALE = 1.0
+TELEOP_ABS_PITCH_SCALE = 1.0
+TELEOP_ABS_YAW_SCALE = 1.0
+TELEOP_ABS_ROLL_OFFSET = 0.0
+TELEOP_ABS_PITCH_OFFSET = 0.0
+TELEOP_ABS_YAW_OFFSET = 0.0
 TELEOP_LOCK_RPY = False
 TELEOP_LOCK_ROLL = 0.0
 TELEOP_LOCK_PITCH = 0.0
@@ -469,24 +482,34 @@ class VR:
         self.target_pose[2] += dz
 
     def _update_absolute_translation(self, curr_vr_pose):
-        if self.abs_ref_vr_pos is None or self.abs_base_target_pos is None:
-            self.abs_ref_vr_pos = [curr_vr_pose[0], curr_vr_pose[1], curr_vr_pose[2]]
-            self.abs_base_target_pos = [self.target_pose[0], self.target_pose[1], self.target_pose[2]]
-        dx = (curr_vr_pose[0] - self.abs_ref_vr_pos[0]) * TELEOP_ABS_XYZ_SCALE
-        dy = (curr_vr_pose[1] - self.abs_ref_vr_pos[1]) * TELEOP_ABS_XYZ_SCALE
-        dz = (curr_vr_pose[2] - self.abs_ref_vr_pos[2]) * TELEOP_ABS_XYZ_SCALE
-        dpos = math.sqrt(dx * dx + dy * dy + dz * dz)
+        x = curr_vr_pose[0] * TELEOP_ABS_X_SCALE * TELEOP_ABS_XYZ_SCALE + TELEOP_ABS_X_OFFSET
+        y = curr_vr_pose[1] * TELEOP_ABS_Y_SCALE * TELEOP_ABS_XYZ_SCALE + TELEOP_ABS_Y_OFFSET
+        z = curr_vr_pose[2] * TELEOP_ABS_Z_SCALE * TELEOP_ABS_XYZ_SCALE + TELEOP_ABS_Z_OFFSET
+        dpos = math.sqrt(
+            (x - self.target_pose[0]) ** 2 +
+            (y - self.target_pose[1]) ** 2 +
+            (z - self.target_pose[2]) ** 2
+        )
         if dpos < self.deadband_pos_m:
             return
-        self.target_pose[0] = self.abs_base_target_pos[0] + dx
-        self.target_pose[1] = self.abs_base_target_pos[1] + dy
-        self.target_pose[2] = self.abs_base_target_pos[2] + dz
+        self.target_pose[0] = x
+        self.target_pose[1] = y
+        self.target_pose[2] = z
 
     def _update_absolute_orientation(self, curr_vr_pose):
         if TELEOP_LOCK_RPY:
             self.target_pose[3] = TELEOP_LOCK_ROLL
             self.target_pose[4] = TELEOP_LOCK_PITCH
             self.target_pose[5] = TELEOP_LOCK_YAW
+            return
+        if TELEOP_RPY_ABSOLUTE:
+            roll = curr_vr_pose[3] * TELEOP_ABS_ROLL_SCALE + TELEOP_ABS_ROLL_OFFSET
+            pitch = curr_vr_pose[4] * TELEOP_ABS_PITCH_SCALE + TELEOP_ABS_PITCH_OFFSET
+            yaw = curr_vr_pose[5] * TELEOP_ABS_YAW_SCALE + TELEOP_ABS_YAW_OFFSET
+            roll = float(np.clip(roll, TELEOP_ROLL_MIN_RAD, TELEOP_ROLL_MAX_RAD))
+            pitch = float(np.clip(pitch, TELEOP_PITCH_MIN_RAD, TELEOP_PITCH_MAX_RAD))
+            yaw = float(np.clip(yaw, TELEOP_YAW_MIN_RAD, TELEOP_YAW_MAX_RAD))
+            self.target_pose[3], self.target_pose[4], self.target_pose[5] = roll, pitch, yaw
             return
         q_curr = quaternion_from_euler(curr_vr_pose[3], curr_vr_pose[4], curr_vr_pose[5])
         if self.orient_ref_vr_q is None or self.orient_base_target_q is None:
@@ -562,8 +585,6 @@ class VR:
             self.target_pose = [0.19, 0.0, 0.2, 0, 0, 0]
             self.ik_cmd_pose = list(self.target_pose)
             self.last_vr_pose = RR
-            self.abs_ref_vr_pos = [RR[0], RR[1], RR[2]]
-            self.abs_base_target_pos = [self.target_pose[0], self.target_pose[1], self.target_pose[2]]
             self.orient_ref_vr_q = list(quaternion_from_euler(RR[3], RR[4], RR[5]))
             self.orient_base_target_q = list(quaternion_from_euler(
                 self.target_pose[3], self.target_pose[4], self.target_pose[5]
@@ -577,8 +598,6 @@ class VR:
                 self.last_vr_pose = RR
             else:
                 if not self.prev_b_pressed:
-                    self.abs_ref_vr_pos = [RR[0], RR[1], RR[2]]
-                    self.abs_base_target_pos = [self.target_pose[0], self.target_pose[1], self.target_pose[2]]
                     self.orient_ref_vr_q = list(quaternion_from_euler(RR[3], RR[4], RR[5]))
                     self.orient_base_target_q = list(quaternion_from_euler(
                         self.target_pose[3], self.target_pose[4], self.target_pose[5]
