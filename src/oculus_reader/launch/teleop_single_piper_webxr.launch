@@ -1,0 +1,13 @@
+<launch>
+  <arg name="run_piper" default="false" />
+  <arg name="run_teleop" default="true" />
+  <arg name="enable_rviz" default="false" />
+
+  <include if="$(arg run_piper)" file="$(find piper)/launch/start_single_piper.launch"/>
+
+  <node if="$(arg run_teleop)" name="teleop_single_piper_node" pkg="oculus_reader" type="teleop_single_piper_xr.py" output="screen" />
+
+  <node name="webxr_pub_pose_node" pkg="oculus_reader" type="webxr_pub_pose.py" output="screen" />
+
+  <node if="$(arg enable_rviz)" name="rviz" pkg="rviz" type="rviz" args="-d $(find oculus_reader)/config/oculus_reader.rviz" />
+</launch>
