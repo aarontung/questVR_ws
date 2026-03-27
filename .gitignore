@@ -3,3 +3,4 @@
 .catkin_workspace
 __pycache__
 .vscode
+docker/certs/*.key

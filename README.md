@@ -399,7 +399,7 @@ self.oculus_reader = OculusReader(ip_address='192.168.1.101')
 推荐直接使用脚本（已内置 WebXR 与 HTTPS 参数）：
 
 ```bash
-./run_signle_teleop_xr.sh
+./run_single_teleop_xr.sh
 ```
 
 然后在 PICO 打开：
@@ -421,7 +421,7 @@ docker build -f docker/Dockerfile.webxr -t questvr-webxr:latest .
 推荐直接使用脚本启动（HTTPS）：
 
 ```bash
-./run_signle_teleop_xr.sh
+./run_single_teleop_xr.sh
 ```
 
 双臂 WebXR：
