@@ -459,9 +459,14 @@ docker build -f docker/Dockerfile.webxr -t questvr-webxr:latest .
 
 以上脚本默认使用：
 
-- 证书目录：`/home/user/questVR_ws/docker/certs`
+- 证书目录：`/home/user/questVR_ws/certs`
 - 端口：`8012`
 - 头显访问地址：`https://<你的电脑IP>:8012/`
+
+证书文件请放在：
+
+- `/home/user/questVR_ws/certs/fullchain.pem`
+- `/home/user/questVR_ws/certs/privkey.pem`
 
 ### Docker 运行（Gazebo）
 

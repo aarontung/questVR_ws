@@ -3,7 +3,7 @@ set -euo pipefail
 
 IMAGE="${IMAGE:-questvr-webxr:latest}"
 WS_HOST="${WS_HOST:-/home/user/questVR_ws}"
-CERT_DIR="${CERT_DIR:-/home/user/questVR_ws/docker/certs}"
+CERT_DIR="${CERT_DIR:-/home/user/questVR_ws/certs}"
 
 if [[ ! -f "${CERT_DIR}/fullchain.pem" || ! -f "${CERT_DIR}/privkey.pem" ]]; then
   echo "[err] cert files not found under ${CERT_DIR}"
