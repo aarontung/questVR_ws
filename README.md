@@ -389,3 +389,90 @@ self.oculus_reader = OculusReader(ip_address='192.168.1.101')
 2. **启动应用程序：
    - 参考[软件启动](#软件启动)开启动程序。
    - 程序启动后可能会弹出“允许 USB 调试”，勾选“允许”并确认。
+
+## WebXR / PICO
+
+现在支持 `webxr` 后端，会在本机启动一个 Web 页面与 WebSocket 数据端点（`/ws`），PICO 浏览器直接打开即可。
+
+### 启动方式
+
+```bash
+export OCULUS_READER_BACKEND=webxr
+export WEBXR_HOST=0.0.0.0
+export WEBXR_PORT=8012
+export WEBXR_CERT=/path/to/fullchain.pem
+export WEBXR_KEY=/path/to/privkey.pem
+roslaunch oculus_reader teleop_single_piper.launch
+```
+
+然后在 PICO 打开：
+
+```text
+https://<你的电脑IP>:8012
+```
+
+进入页面后点击 `Enter VR`，动手柄后终端会开始发布 `/right_handle_pose`。
+
+### WebXR 的 SSL（HTTPS）配置
+
+WebXR 需要安全上下文，建议直接配置 TLS：
+
+```bash
+export OCULUS_READER_BACKEND=webxr
+export WEBXR_CERT=/path/to/fullchain.pem
+export WEBXR_KEY=/path/to/privkey.pem
+```
+
+然后正常启动：
+
+```bash
+roslaunch oculus_reader teleop_single_piper.launch
+```
+
+若你仅用于内网测试，可先生成自签证书（注意：PICO/浏览器必须信任该证书链）：
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout server.key -out server.crt -days 365 \
+  -subj "/CN=<你的IP或域名>"
+```
+
+### Docker 运行（WebXR）
+
+构建镜像：
+
+```bash
+docker build -f docker/Dockerfile.webxr -t questvr-webxr:latest .
+```
+
+推荐直接使用脚本启动（HTTPS）：
+
+```bash
+./run_signle_teleop_xr.sh
+```
+
+双臂 WebXR：
+
+```bash
+./run_double_teleop_xr.sh
+```
+
+以上脚本默认使用：
+
+- 证书目录：`/home/user/questVR_ws/docker/certs`
+- 端口：`8012`
+- 头显访问地址：`https://<你的电脑IP>:8012/`
+
+### Docker 运行（Gazebo）
+
+构建 Gazebo 镜像：
+
+```bash
+docker build -f docker/Dockerfile.gazebo -t questvr-gazebo:latest .
+```
+
+启动 Gazebo 仿真（已封装 X11 + workspace 挂载 + launch）：
+
+```bash
+./run_gazebo_sim.sh
+```

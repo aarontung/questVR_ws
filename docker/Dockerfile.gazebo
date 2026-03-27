@@ -1,0 +1,47 @@
+FROM osrf/ros:noetic-desktop-full
+
+ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-lc"]
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3-pip \
+    python3-rospkg \
+    python3-catkin-tools \
+    python3-empy \
+    ros-noetic-gazebo-ros-pkgs \
+    ros-noetic-gazebo-ros-control \
+    ros-noetic-ros-control \
+    ros-noetic-ros-controllers \
+    ros-noetic-controller-manager \
+    ros-noetic-joint-state-controller \
+    ros-noetic-joint-state-publisher \
+    ros-noetic-robot-state-publisher \
+    ros-noetic-xacro \
+    ros-noetic-tf \
+    ros-noetic-tf2-ros \
+    ros-noetic-std-msgs \
+    ros-noetic-geometry-msgs \
+    ros-noetic-sensor-msgs \
+    ros-noetic-trajectory-msgs \
+    ros-noetic-message-generation \
+    ros-noetic-message-runtime \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace/questVR_ws
+COPY . /workspace/questVR_ws
+
+RUN if [ -d /workspace/questVR_ws/piper_ros/src/piper_sim/piper_gazebo ] \
+      && [ ! -e /workspace/questVR_ws/src/piper_gazebo ]; then \
+      ln -s /workspace/questVR_ws/piper_ros/src/piper_sim/piper_gazebo /workspace/questVR_ws/src/piper_gazebo; \
+    fi
+
+RUN source /opt/ros/noetic/setup.bash \
+    && catkin_make \
+    && echo "source /opt/ros/noetic/setup.bash" >> /root/.bashrc \
+    && echo "source /workspace/questVR_ws/devel/setup.bash" >> /root/.bashrc
+
+ENV PYTHONUNBUFFERED=1
+ENV ROS_MASTER_URI=http://127.0.0.1:11311
+
+CMD ["bash"]

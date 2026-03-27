@@ -1,0 +1,77 @@
+FROM osrf/ros:noetic-desktop-full
+
+ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-lc"]
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    wget \
+    ca-certificates \
+    patchelf \
+    python3-pip \
+    python3-rospkg \
+    python3-catkin-tools \
+    python3-empy \
+    libosmesa6-dev \
+    libgl1-mesa-dev \
+    libgl1-mesa-glx \
+    libglu1-mesa-dev \
+    libglew-dev \
+    libglfw3 \
+    libglfw3-dev \
+    libxrandr2 \
+    libxinerama1 \
+    libxcursor1 \
+    libxi6 \
+    mesa-utils \
+    ros-noetic-tf \
+    ros-noetic-tf2-ros \
+    ros-noetic-std-msgs \
+    ros-noetic-geometry-msgs \
+    ros-noetic-actionlib \
+    ros-noetic-actionlib-msgs \
+    ros-noetic-control-msgs \
+    ros-noetic-sensor-msgs \
+    ros-noetic-trajectory-msgs \
+    ros-noetic-message-generation \
+    ros-noetic-message-runtime \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh \
+    && bash /tmp/miniconda.sh -b -p /opt/conda \
+    && rm -f /tmp/miniconda.sh
+
+ENV PATH=/opt/conda/bin:${PATH}
+
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main \
+    && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r \
+    && conda update -n base -c defaults -y conda \
+    && conda create -n vt -y python=3.9 \
+    && conda install -n vt -y -c conda-forge pinocchio==3.2.0 casadi==3.6.7 \
+    && conda run -n vt pip install --no-cache-dir \
+        meshcat rospkg pyyaml pure-python-adb piper-sdk "websockets==10.4" "mujoco-py<2.2,>=2.1" glfw
+
+RUN mkdir -p /root/.mujoco \
+    && wget -q https://github.com/google-deepmind/mujoco/releases/download/2.1.0/mujoco210-linux-x86_64.tar.gz -O /tmp/mujoco210.tar.gz \
+    && tar -xzf /tmp/mujoco210.tar.gz -C /root/.mujoco \
+    && rm -f /tmp/mujoco210.tar.gz
+
+ENV MUJOCO_PY_MUJOCO_PATH=/root/.mujoco/mujoco210
+ENV LD_LIBRARY_PATH=/root/.mujoco/mujoco210/bin:/usr/lib/x86_64-linux-gnu
+ENV PYTHONPATH=/opt/ros/noetic/lib/python3/dist-packages
+
+WORKDIR /workspace/questVR_ws
+RUN mkdir -p /workspace/questVR_ws/src
+
+ENV OCULUS_READER_BACKEND=webxr
+ENV WEBXR_HOST=0.0.0.0
+ENV WEBXR_PORT=8012
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8012
+
+COPY docker/entrypoint_webxr.sh /usr/local/bin/entrypoint_webxr.sh
+RUN chmod +x /usr/local/bin/entrypoint_webxr.sh
+
+ENTRYPOINT ["/usr/local/bin/entrypoint_webxr.sh"]
+CMD ["bash"]
