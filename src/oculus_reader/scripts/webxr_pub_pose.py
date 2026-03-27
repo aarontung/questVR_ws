@@ -4,7 +4,6 @@
 import asyncio
 from http import HTTPStatus
 import json
-import os
 import ssl
 import threading
 import time
@@ -16,6 +15,13 @@ import tf2_ros
 import websockets
 from std_msgs.msg import String
 from tf.transformations import quaternion_from_matrix
+
+WEBXR_HOST = '0.0.0.0'
+WEBXR_PORT = 8012
+WEBXR_CERT = '/certs/fullchain.pem'
+WEBXR_KEY = '/certs/privkey.pem'
+WEBXR_PRINT_HZ = 1.0
+WEBXR_DEBUG_EVENTS = False
 
 
 WEBXR_SENDER_HTML = """<!doctype html>
@@ -182,6 +188,8 @@ def default_buttons():
         'LTr': False,
         'rightTrig': (0.0,),
         'leftTrig': (0.0,),
+        'rightGrip': (0.0,),
+        'leftGrip': (0.0,),
         'rightJS': (0.0, 0.0),
         'leftJS': (0.0, 0.0),
     }
@@ -235,12 +243,14 @@ class WebXRDataSource:
             out['RTr'] = bool(r_state.get('trigger', False))
             out['rightJS'] = self._vec2(r_state.get('thumbstickValue'))
             out['rightTrig'] = self._vec1(r_state.get('triggerValue'))
+            out['rightGrip'] = self._vec1(r_state.get('squeezeValue'))
         if isinstance(l_state, dict):
             out['X'] = bool(l_state.get('aButton', False))
             out['Y'] = bool(l_state.get('bButton', False))
             out['LTr'] = bool(l_state.get('trigger', False))
             out['leftJS'] = self._vec2(l_state.get('thumbstickValue'))
             out['leftTrig'] = self._vec1(l_state.get('triggerValue'))
+            out['leftGrip'] = self._vec1(l_state.get('squeezeValue'))
         return out
 
     def _update(self, payload):
@@ -382,17 +392,17 @@ class WebXRPosePublisher:
         self.buttons_pub = rospy.Publisher('oculus_buttons', String, queue_size=1)
         self.br = tf2_ros.TransformBroadcaster()
         self.rate = rospy.Rate(100)
-        self.debug_hz = float(os.getenv('WEBXR_PRINT_HZ', '0') or 0.0)
+        self.debug_hz = float(WEBXR_PRINT_HZ or 0.0)
         self.debug_period = (1.0 / self.debug_hz) if self.debug_hz > 0.0 else 0.0
         self._last_debug_time = 0.0
         self._prev_rx_count = 0
         self._prev_rx_wall = 0.0
 
-        host = os.getenv('WEBXR_HOST', '0.0.0.0')
-        port = int(os.getenv('WEBXR_PORT', '8012'))
-        cert = os.getenv('WEBXR_CERT')
-        key = os.getenv('WEBXR_KEY')
-        debug = str(os.getenv('WEBXR_DEBUG_EVENTS', '0')).lower() in ('1', 'true', 'yes', 'on')
+        host = str(WEBXR_HOST)
+        port = int(WEBXR_PORT)
+        cert = WEBXR_CERT
+        key = WEBXR_KEY
+        debug = bool(WEBXR_DEBUG_EVENTS)
         self.source = WebXRDataSource(host=host, port=port, cert=cert, key=key, debug=debug)
         self.source.start()
 
@@ -466,6 +476,8 @@ class WebXRPosePublisher:
             'LTr': bool(buttons.get('LTr', False)),
             'rightTrig': float((buttons.get('rightTrig', (0.0,)) or (0.0,))[0]),
             'leftTrig': float((buttons.get('leftTrig', (0.0,)) or (0.0,))[0]),
+            'rightGrip': float((buttons.get('rightGrip', (0.0,)) or (0.0,))[0]),
+            'leftGrip': float((buttons.get('leftGrip', (0.0,)) or (0.0,))[0]),
             'rightJS': list(buttons.get('rightJS', (0.0, 0.0))),
             'leftJS': list(buttons.get('leftJS', (0.0, 0.0))),
         }
@@ -494,7 +506,7 @@ class WebXRPosePublisher:
                             rx_hz = 0.0
                         client_age_ms = (now * 1000.0 - dbg['last_client_ts_ms']) if dbg['last_client_ts_ms'] > 0.0 else -1.0
                         rospy.loginfo(
-                            '[webxr_debug] rx_hz=%.1f age=%.3fs client_age=%.1fms seq=%d A=%s B=%s rt=%.3f hasR=%s hasL=%s',
+                            '[webxr_debug] rx_hz=%.1f age=%.3fs client_age=%.1fms seq=%d A=%s B=%s rt=%.3f rg=%.3f hasR=%s hasL=%s',
                             rx_hz,
                             age,
                             client_age_ms,
@@ -502,6 +514,7 @@ class WebXRPosePublisher:
                             bool(buttons.get('A', False)),
                             bool(buttons.get('B', False)),
                             float((buttons.get('rightTrig', (0.0,)) or (0.0,))[0]),
+                            float((buttons.get('rightGrip', (0.0,)) or (0.0,))[0]),
                             ('r' in transforms),
                             ('l' in transforms),
                         )

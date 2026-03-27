@@ -15,13 +15,6 @@ docker run --rm -it \
   --network host \
   --privileged \
   -v /dev/bus/usb:/dev/bus/usb \
-  -e ROS_MASTER_URI=http://127.0.0.1:11311 \
-  -e ROS_IP=127.0.0.1 \
-  -e WEBXR_CERT=/certs/fullchain.pem \
-  -e WEBXR_KEY=/certs/privkey.pem \
-  -e OCULUS_READER_BACKEND=webxr \
-  -e TELEOP_USE_OCULUS_READER=0 \
-  -e WEBXR_PRINT_HZ=1 \
   -v "${CERT_DIR}":/certs:ro \
   -v "${WS_HOST}":/workspace/questVR_ws \
   "${IMAGE}" \
