@@ -33,12 +33,18 @@ WEBXR_SENDER_HTML = """<!doctype html>
 <body>
   <h2>WebXR Pose Publisher</h2>
   <p id="status">status: idle</p>
-  <button id="startBtn">Enter XR (Passthrough)</button>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <button id="startAutoBtn">Enter XR (Auto)</button>
+    <button id="startArBtn">Enter Passthrough</button>
+    <button id="startVrBtn">Enter VR</button>
+  </div>
   <pre id="log">waiting...</pre>
   <script>
     const statusEl = document.getElementById("status");
     const logEl = document.getElementById("log");
-    const btn = document.getElementById("startBtn");
+    const startAutoBtn = document.getElementById("startAutoBtn");
+    const startArBtn = document.getElementById("startArBtn");
+    const startVrBtn = document.getElementById("startVrBtn");
     let xrSession = null;
     let refSpace = null;
     let ws = null;
@@ -121,7 +127,7 @@ WEBXR_SENDER_HTML = """<!doctype html>
       session.requestAnimationFrame(onXRFrame);
     }
 
-    btn.onclick = async () => {
+    async function startXR(mode) {
       if (!navigator.xr) {
         statusEl.textContent = "status: WebXR not available";
         return;
@@ -130,7 +136,7 @@ WEBXR_SENDER_HTML = """<!doctype html>
         statusEl.textContent = "status: connecting websocket";
         await connectSocket();
         const params = new URLSearchParams(window.location.search);
-        const wantPassthrough = params.get("passthrough") !== "0";
+        const wantPassthrough = (mode === "ar") || (mode === "auto" && params.get("passthrough") !== "0");
         let sessionMode = "immersive-vr";
         if (wantPassthrough) {
           try {
@@ -155,7 +161,11 @@ WEBXR_SENDER_HTML = """<!doctype html>
       } catch (e) {
         statusEl.textContent = "status: failed " + e;
       }
-    };
+    }
+
+    startAutoBtn.onclick = () => startXR("auto");
+    startArBtn.onclick = () => startXR("ar");
+    startVrBtn.onclick = () => startXR("vr");
   </script>
 </body>
 </html>
