@@ -27,9 +27,9 @@ MESHCAT_OPEN = False
 TELEOP_CHECK_COLLISION = False
 TELEOP_PRINT_HZ = 0.0
 TELEOP_DEADBAND_POS_M = 0.003
-TELEOP_DEADBAND_ROT_RAD = 0.05
+TELEOP_DEADBAND_ROT_RAD = 0.02
 TELEOP_MAX_STEP_M = 0.01
-TELEOP_ROT_GAIN = 1.8
+TELEOP_ROT_GAIN = 1.2
 TELEOP_JOINT_DEADBAND_RAD = 0.003
 TELEOP_GRIPPER_DEADBAND = 0.001
 TELEOP_GRIPPER_RATE = 0.03
@@ -43,7 +43,7 @@ TELEOP_ABS_Z_SCALE = 1.0
 TELEOP_ABS_X_OFFSET = 0.0
 TELEOP_ABS_Y_OFFSET = 0.0
 TELEOP_ABS_Z_OFFSET = 0.0
-TELEOP_RPY_ABSOLUTE = True
+TELEOP_RPY_ABSOLUTE = False
 TELEOP_ABS_ROLL_SCALE = 1.0
 TELEOP_ABS_PITCH_SCALE = 1.0
 TELEOP_ABS_YAW_SCALE = 1.0
@@ -54,13 +54,13 @@ TELEOP_LOCK_RPY = False
 TELEOP_LOCK_ROLL = 0.0
 TELEOP_LOCK_PITCH = 0.0
 TELEOP_LOCK_YAW = 0.0
-TELEOP_ROLL_MIN_RAD = -0.6
-TELEOP_ROLL_MAX_RAD = 0.6
+TELEOP_ROLL_MIN_RAD = -1.0
+TELEOP_ROLL_MAX_RAD = 1.0
 TELEOP_PITCH_MIN_RAD = -0.6
 TELEOP_PITCH_MAX_RAD = 0.6
-TELEOP_YAW_MIN_RAD = -0.2
-TELEOP_YAW_MAX_RAD = 0.2
-TELEOP_IK_SPEED = 8.0
+TELEOP_YAW_MIN_RAD = -0.6
+TELEOP_YAW_MAX_RAD = 0.6
+TELEOP_IK_SPEED = 6.0
 TELEOP_DISABLE_IK = False
 TELEOP_STOP_IK_WHEN_A = False
 TELEOP_RX_PRINT_HZ = 0.0
@@ -520,16 +520,21 @@ class VR:
 
         q_ref_inv = [-self.orient_ref_vr_q[0], -self.orient_ref_vr_q[1], -self.orient_ref_vr_q[2], self.orient_ref_vr_q[3]]
         q_delta = self._qmul(q_ref_inv, q_curr)
-        if self.rot_gain != 1.0:
-            qw = min(1.0, max(-1.0, q_delta[3]))
-            angle = 2.0 * math.acos(qw)
-            sin_half = math.sqrt(max(0.0, 1.0 - qw * qw))
-            if sin_half > 1e-6:
-                axis = [q_delta[0] / sin_half, q_delta[1] / sin_half, q_delta[2] / sin_half]
-                scaled = angle * self.rot_gain
-                half = 0.5 * scaled
-                s = math.sin(half)
-                q_delta = [axis[0] * s, axis[1] * s, axis[2] * s, math.cos(half)]
+        qw = min(1.0, max(-1.0, q_delta[3]))
+        angle = 2.0 * math.acos(qw)
+        if angle < self.deadband_rot_rad:
+            return
+
+        sin_half = math.sqrt(max(0.0, 1.0 - qw * qw))
+        if sin_half <= 1e-6:
+            return
+        axis = [q_delta[0] / sin_half, q_delta[1] / sin_half, q_delta[2] / sin_half]
+
+        # Suppress controller micro jitter, then scale user-intended rotation.
+        scaled = (angle - self.deadband_rot_rad) * self.rot_gain
+        half = 0.5 * scaled
+        s = math.sin(half)
+        q_delta = [axis[0] * s, axis[1] * s, axis[2] * s, math.cos(half)]
         q_target = self._qmul(self.orient_base_target_q, q_delta)
         norm = math.sqrt(sum(v * v for v in q_target))
         if norm > 1e-9:
